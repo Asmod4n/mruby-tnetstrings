@@ -10,7 +10,7 @@ class String
   end
 end
 
-# Copyright (c) 2014 Alex Brem
+# Copyright (c) 2011 Matt Yoho
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -31,109 +31,168 @@ end
 # THE SOFTWARE.
 
 module TNetStrings
-  def self.dump(data)
-    case data
-      when String then "#{data.bytesize}:#{data.bytes.pack('C*')},"
-      when Symbol then "#{data.to_s.length}:#{data.to_s},"
-      when Fixnum  then "#{data.to_s.length}:#{data.to_s}#"
-      when Float then "#{data.to_s.length}:#{data.to_s}^"
-      when TrueClass then "4:true!"
-      when FalseClass then "5:false!"
-      when NilClass then "0:~"
-      when Array then dump_array(data)
-      when Hash then dump_hash(data)
-    else
-      if data.respond_to?(:to_s)
-        s = data.to_s
-        "#{s.length}:#{s},"
-      else
-        raise "Can't serialize stuff that's '#{data.class}'."
-      end
-    end
-  end
-
-  def self.parse(data)
-    raise "Invalid data." if data.empty?
-    payload, payload_type, remain = parse_payload(data)
-
+  class ProcessError < StandardError; end
+  # Converts a tnetstring into the encoded data structure.
+  #
+  # It expects a string argument prefixed with a valid tnetstring and
+  # returns a tuple of the parsed object and any remaining string input.
+  #
+  # === Example
+  #
+  #  str = '5:12345#'
+  #  TNetStrings.parse(str)
+  #
+  #  #=> [12345, '']
+  #
+  #  str = '11:hello world,abc123'
+  #  TNetStrings.parse(str)
+  #
+  #  #=> ['hello world', 'abc123']
+  #
+  def self.parse(tnetstring)
+    payload, payload_type, remain = parse_payload(tnetstring)
     value = case payload_type
-      when ',' then payload
-      when '#' then payload.to_i
-      when '^' then payload.to_f
-      when '!' then payload == 'true'
-      when ']' then parse_array(payload)
-      when '}' then parse_hash(payload)
-      when '~'
-        raise "Payload must be 0 length for null." unless payload.length == 0
-        nil
-      else
-        raise "Invalid payload type: #{payload_type}"
-    end
-
-    [ value, remain ]
-  end
-
-  def self.parse_payload(data)
-    raise "Invalid payload type: #{payload_type}" if data.empty?
-
-    len, extra = data.split(':', 2)
-    len = len.to_i
-    if len == 0
-      payload = ''
+    when '#'
+      Integer(payload)
+    when '^'
+      Float(payload)
+    when ','
+      payload
+    when ']'
+      parse_list(payload)
+    when '}'
+      parse_dictionary(payload)
+    when '~'
+      assert payload.bytesize == 0, "Payload must be 0 length for null"
+      nil
+    when '!'
+      parse_boolean(payload)
     else
-      payload, extra = extra.byteslice(0..len-1), extra.byteslice(len..-1)
+      assert false, "Invalid payload type: #{payload_type}"
     end
-    payload_type, remain = extra[0], extra[1..-1]
-
-    [ payload, payload_type, remain ]
+    [value, remain]
   end
 
-  private
+  def self.parse_payload(data) # :nodoc:
+    assert data, "Invalid data to parse; it's empty"
+    length, extra = data.split(':', 2)
+    length = Integer(length)
+    assert length <= 999_999_999, "Data is longer than the specification allows"
+    assert length >= 0, "Data length cannot be negative"
 
-  def self.parse_array(data)
-    arr = []
-    return arr if data.empty?
+    payload, extra = extra.byteslice(0..length-1), extra.byteslice(length..-1)
+    assert extra, "No payload type: #{payload}, #{extra}"
+    payload_type, remain = extra[0,1], extra[1..-1]
 
-    begin
-      value, data = parse(data)
-      arr << value
-    end while not data.empty?
-
-    arr
+    assert payload.bytesize == length, "Data is wrong length: #{length} expected but was #{payload.bytesize}"
+    [payload, payload_type, remain]
   end
 
-  def self.parse_pair(data)
+  def self.parse_list(data) # :nodoc:
+    return [] if data.bytesize == 0
+    list = []
+    value, remain = parse(data)
+    list << value
+
+    while remain.bytesize > 0
+      value, remain = parse(remain)
+      list << value
+    end
+    list
+  end
+
+  def self.parse_dictionary(data) # :nodoc:
+    return {} if data.bytesize == 0
+
+    key, value, extra = parse_pair(data)
+    result = {key => value}
+
+    while extra.bytesize > 0
+        key, value, extra = parse_pair(extra)
+        result[key] = value
+    end
+    result
+  end
+
+  def self.parse_pair(data) # :nodoc:
     key, extra = parse(data)
-    raise "Unbalanced hash" if extra.empty?
+    assert key.kind_of?(String) || key.kind_of?(Symbol), "Dictionary keys must be Strings or Symbols"
+    assert extra, "Unbalanced dictionary store"
     value, extra = parse(extra)
 
-    [ key, value, extra ]
+    [key, value, extra]
   end
 
-  def self.parse_hash(data)
-    hsh = {}
-    return hsh if data.empty?
-
-    begin
-      key, value, data = parse_pair(data)
-      hsh[key.to_sym] = value
-    end while not data.empty?
-
-    hsh
-  end
-
-  def self.dump_array(data)
-    payload = ""
-    data.each { |v| payload << dump(v) }
-    "#{payload.length}:#{payload}]"
-  end
-
-  def self.dump_hash(data)
-    payload = ""
-    data.each do |k,v|
-      payload << dump(k.to_s)
-      payload << dump(v)
+  def self.parse_boolean(data) # :nodoc:
+    case data
+    when "false"
+      false
+    when "true"
+      true
+    else
+      assert false, "Boolean wasn't 'true' or 'false'"
     end
-    "#{payload.length}:#{payload}}"
+  end
+
+  # Constructs a tnetstring out of the given object. Valid Ruby object types
+  # include strings, integers, boolean values, nil, arrays, and hashes. Arrays
+  # and hashes may contain any of the previous valid Ruby object types, but
+  # hash keys must be strings.
+  #
+  # === Example
+  #
+  #  int = 12345
+  #  TNetstring.dump(int)
+  #
+  #  #=> '5:12345#'
+  #
+  #  hash = {'hello' => 'world'}
+  #  TNetstring.dump(hash)
+  #
+  #  #=> '16:5:hello,5:world,}'
+  #
+  def self.dump(obj)
+    case obj
+    when Integer
+      obj = String(obj)
+      "#{obj.bytesize}:#{obj}#"
+    when Float
+      obj = String(obj)
+      "#{obj.bytesize}:#{obj}^"
+    when String
+      "#{obj.bytesize}:#{obj},"
+    when Symbol
+      obj = String(obj)
+      "#{obj.bytesize}:#{obj},"
+    when TrueClass
+      "4:true!"
+    when FalseClass
+      "5:false!"
+    when NilClass
+      "0:~"
+    when Array
+      dump_list(obj)
+    when Hash
+      dump_dictionary(obj)
+    else
+      assert false, "Object must be of a primitive type: #{obj.inspect}"
+    end
+  end
+
+  def self.dump_list(list) # :nodoc:
+    contents = list.map {|item| dump(item)}.join
+    "#{contents.bytesize}:#{contents}]"
+  end
+
+  def self.dump_dictionary(dict) # :nodoc:
+    contents = dict.map do |key, value|
+      assert key.kind_of?(String) || key.kind_of?(Symbol), "Dictionary keys must be Strings or Symbols"
+      "#{dump(key)}#{dump(value)}"
+    end.join
+    "#{contents.bytesize}:#{contents}}"
+  end
+
+  def self.assert(truthy, message) # :nodoc:
+    raise ProcessError.new(message) unless truthy
   end
 end
