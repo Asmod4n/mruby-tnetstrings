@@ -36,7 +36,7 @@ class M2M
       raise "not a websocket message"
     end
 
-    flags = headers[FLAGS].to_i(16)
+    flags = Integer(headers[FLAGS], 16)
     fin = flags & 0x80 == 0x80
     rsvd = flags & 0x70
     opcode =  case (flags & 0xf)
@@ -57,30 +57,35 @@ class M2M
               end
 
     [sender, conn_id, path, headers, fin, rsvd, opcode, body]
+  rescue ArgumentError => e
+    close(sender, conn_id)
+    raise e
   end
 
   CSTAR = 'C*'
 
   def send_websocket(sender, conn_id, data, opcode = 1, rsvd = 0)
-    header = [0x80|rsvd<<4|opcode]
+    data = String(data)
     len = data.bytesize
-    if len <= 125
-      header[1] = len
-    elsif len >= 126 && len <= 65535
-      header[1] = 126
-      header[2] = (len >> 8) & 255
-      header[3] = (len) & 255
-    else
-      header[1] = 127
-      header[2] = (len >> 56) & 255
-      header[3] = (len >> 48) & 255
-      header[4] = (len >> 40) & 255
-      header[5] = (len >> 32) & 255
-      header[6] = (len >> 24) & 255
-      header[7] = (len >> 16) & 255
-      header[8] = (len >> 8) & 255
-      header[9] = (len) & 255
-    end
-    send(sender, conn_id, "#{header.pack(CSTAR)}#{data}")
+    raise ArgumentError, "len musn't be negative" if len < 0
+    header =  if len <= 125
+                [0x80|rsvd<<4|opcode, len]
+              elsif len >= 126 && len <= 65535
+                [0x80|rsvd<<4|opcode, 126, (len >> 8) & 255, (len) & 255]
+              else
+                [
+                  0x80|rsvd<<4|opcode,
+                  127,
+                  (len >> 56) & 255,
+                  (len >> 48) & 255,
+                  (len >> 40) & 255,
+                  (len >> 32) & 255,
+                  (len >> 24) & 255,
+                  (len >> 16) & 255.
+                  (len >> 8) & 255,
+                  (len) & 255
+                ]
+              end.pack(CSTAR)
+    send(sender, conn_id, "#{header}#{data}")
   end
 end
