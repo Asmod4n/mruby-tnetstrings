@@ -41,7 +41,7 @@ class Zurl
   def queue(meth, uri, headers = nil, body = nil)
     id = RandomBytes.buf(16)
     seq = 0
-    req = {from: @client_id, id: id, seq: seq, stream: true, credits: 16384, method: meth, uri: uri}
+    req = {from: @client_id, id: id, seq: seq, stream: true, credits: 32767, method: meth, uri: uri}
     req[:headers] = headers if headers
     req[:more] = true if body
     CZMQ::Zframe.new("T#{TNetStrings.dump(req)}").send(@push)
@@ -60,7 +60,7 @@ class Zurl
         next
       end
       if data[BODY]
-        req = {from: @client_id, id: id, seq: seq, type: :credit, credits: 16384}
+        req = {from: @client_id, id: id, seq: seq, type: :credit, credits: 32767}
         @router.sendx(data[FROM], DELIMETER, "T#{TNetStrings.dump(req)}")
         seq += 1
       end
