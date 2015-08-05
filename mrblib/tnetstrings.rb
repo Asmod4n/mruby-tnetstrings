@@ -97,15 +97,15 @@ module TNetStrings
     if length < 0
       raise ProcessError, "Data length cannot be negative"
     end
-    payload, extra = extra.byteslice(0..length-1), extra.byteslice(length..-1)
-    unless extra
-      raise ProcessError, "No payload type: #{payload}, #{extra}"
-    end
-    payload_type, remain = extra[0,1], extra[1..-1]
+    payload = extra.byteslice(0...length)
     unless payload.bytesize == length
       raise ProcessError, "Data is wrong length: #{length} expected but was #{payload.bytesize}"
     end
-    [payload, payload_type, remain]
+    extra = extra.byteslice(length..-1)
+    unless extra
+      raise ProcessError, "No payload type: #{payload}, #{extra}"
+    end
+    [payload, extra[0, 1], extra[1..-1]]
   end
 
   def self.parse_list(data) # :nodoc:
