@@ -25,10 +25,44 @@ class M2M
     send(sender, conn_id, nil)
   end
 
+  METHOD = 'METHOD'
+  WEBSOCKET = 'WEBSOCKET'
+  FLAGS = 'FLAGS'
+
+  def recv_websocket
+    sender, conn_id, path, headers, body = recv
+    unless headers[METHOD] == WEBSOCKET
+      close(sender, conn_id)
+      raise "not a websocket message"
+    end
+
+    flags = headers[FLAGS].to_i(16)
+    fin = flags & 0x80 == 0x80
+    rsvd = flags & 0x70
+    opcode =  case (flags & 0xf)
+              when 0x0
+                :continuation
+              when 0x1
+                :text
+              when 0x2
+                :binary
+              when 0x8
+                :connection_close
+              when 0x9
+                :ping
+              when 0xA
+                :pong
+              else
+                flags & 0xf
+              end
+
+    [sender, conn_id, path, headers, fin, rsvd, opcode, body]
+  end
+
   CSTAR = 'C*'
 
   def send_websocket(sender, conn_id, data, opcode = 1, rsvd = 0)
-    header = [0x80|opcode|rsvd<<4]
+    header = [0x80|rsvd<<4|opcode]
     len = data.bytesize
     if len <= 125
       header[1] = len
