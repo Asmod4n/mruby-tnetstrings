@@ -4,8 +4,10 @@ class String
   # Does the same thing as String#slice but
   # operates on bytes instead of characters.
   #
+  CSTAR = 'C*'
+
     def byteslice(*args)
-      unpack('C*').slice(*args).pack('C*')
+      unpack(CSTAR).slice(*args).pack(CSTAR)
     end
   end
 end
@@ -32,6 +34,7 @@ end
 
 module TNetStrings
   class ProcessError < StandardError; end
+
   # Converts a tnetstring into the encoded data structure.
   #
   # It expects a string argument prefixed with a valid tnetstring and
@@ -49,42 +52,59 @@ module TNetStrings
   #
   #  #=> ['hello world', 'abc123']
   #
+  INT = '#'
+  FLOAT = '^'
+  STRING = ','
+  ARY = ']'
+  HASH = '}'
+  NIL = '~'
+  BOOL = '!'
+
   def self.parse(tnetstring)
     payload, payload_type, remain = parse_payload(tnetstring)
     value = case payload_type
-    when '#'
+    when INT
       Integer(payload)
-    when '^'
+    when FLOAT
       Float(payload)
-    when ','
+    when STRING
       payload
-    when ']'
+    when ARY
       parse_list(payload)
-    when '}'
+    when HASH
       parse_dictionary(payload)
-    when '~'
-      assert payload.bytesize == 0, "Payload must be 0 length for null"
+    when NIL
+      unless payload.bytesize == 0
+        raise ProcessError, "Payload must be 0 length for null"
+      end
       nil
-    when '!'
+    when BOOL
       parse_boolean(payload)
     else
-      assert false, "Invalid payload type: #{payload_type}"
+      raise ProcessError, "Invalid payload type: #{payload_type}"
     end
     [value, remain]
   end
 
+  COLON = ':'
+
   def self.parse_payload(data) # :nodoc:
-    assert data, "Invalid data to parse; it's empty"
-    length, extra = data.split(':', 2)
+    unless data
+      raise ProcessError, "Invalid data to parse; it's empty"
+    end
+    length, extra = data.split(COLON, 2)
     length = Integer(length)
-    assert length <= 999_999_999, "Data is longer than the specification allows"
-    assert length >= 0, "Data length cannot be negative"
-
+    if length < 0
+      raise ProcessError, "Data length cannot be negative"
+    end
     payload, extra = extra.byteslice(0..length-1), extra.byteslice(length..-1)
-    assert extra, "No payload type: #{payload}, #{extra}"
+    unless extra
+      raise ProcessError, "No payload type: #{payload}, #{extra}"
+    end
     payload_type, remain = extra[0,1], extra[1..-1]
-
-    assert payload.bytesize == length, "Data is wrong length: #{length} expected but was #{payload.bytesize}"
+    unless payload.bytesize == length
+      raise ProcessError, "Data is wrong length: #{length} expected but was #{payload.bytesize}"
+    end
     [payload, payload_type, remain]
   end
 
@@ -116,21 +136,28 @@ module TNetStrings
 
   def self.parse_pair(data) # :nodoc:
     key, extra = parse(data)
-    assert key.kind_of?(String) || key.kind_of?(Symbol), "Dictionary keys must be Strings or Symbols"
-    assert extra, "Unbalanced dictionary store"
+    unless key.kind_of?(String) || key.kind_of?(Symbol)
+      raise ProcessError, "Dictionary keys must be Strings or Symbols"
+    end
+    unless extra
+      raise ProcessError, "Unbalanced dictionary store"
+    end
     value, extra = parse(extra)
 
     [key, value, extra]
   end
 
+  FALSE = 'false'
+  TRUE = 'true'
+
   def self.parse_boolean(data) # :nodoc:
     case data
-    when "false"
+    when FALSE
       false
-    when "true"
+    when TRUE
       true
     else
-      assert false, "Boolean wasn't 'true' or 'false'"
+      raise ProcessError, "Boolean wasn't 'true' or 'false'"
     end
   end
 
@@ -151,6 +178,10 @@ module TNetStrings
   #
   #  #=> '16:5:hello,5:world,}'
   #
+  TRUE_DUMP = '4:true!'
+  FALSE_DUMP = '5:false!'
+  NIL_DUMP = '0:~'
+
   def self.dump(obj)
     case obj
     when Integer
@@ -165,17 +196,17 @@ module TNetStrings
       obj = String(obj)
       "#{obj.bytesize}:#{obj},"
     when TrueClass
-      "4:true!"
+      TRUE_DUMP
     when FalseClass
-      "5:false!"
+      FALSE_DUMP
     when NilClass
-      "0:~"
+      NIL_DUMP
     when Array
       dump_list(obj)
     when Hash
       dump_dictionary(obj)
     else
-      assert false, "Object must be of a primitive type: #{obj.inspect}"
+      raise ProcessError, "Object must be of a primitive type: #{obj.inspect}"
     end
   end
 
@@ -186,13 +217,11 @@ module TNetStrings
 
   def self.dump_dictionary(dict) # :nodoc:
     contents = dict.map do |key, value|
-      assert key.kind_of?(String) || key.kind_of?(Symbol), "Dictionary keys must be Strings or Symbols"
+      unless key.kind_of?(String) || key.kind_of?(Symbol)
+        raise ProcessError, "Dictionary keys must be Strings or Symbols"
+      end
       "#{dump(key)}#{dump(value)}"
     end.join
     "#{contents.bytesize}:#{contents}}"
-  end
-
-  def self.assert(truthy, message) # :nodoc:
-    raise ProcessError.new(message) unless truthy
   end
 end
