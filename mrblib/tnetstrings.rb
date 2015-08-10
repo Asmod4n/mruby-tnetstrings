@@ -12,7 +12,7 @@ class String
   end
 end
 
-# Copyright (c) 2011 Matt Yoho
+# Copyright (c) 2011,2015 Matt Yoho, Hendrik Beskow
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -136,9 +136,6 @@ module TNetStrings
 
   def self.parse_pair(data) # :nodoc:
     key, extra = parse(data)
-    unless key.kind_of?(String) || key.kind_of?(Symbol)
-      raise ProcessError, "Dictionary keys must be Strings or Symbols"
-    end
     unless extra
       raise ProcessError, "Unbalanced dictionary store"
     end
@@ -217,9 +214,6 @@ module TNetStrings
 
   def self.dump_dictionary(dict) # :nodoc:
     contents = dict.map do |key, value|
-      unless key.kind_of?(String) || key.kind_of?(Symbol)
-        raise ProcessError, "Dictionary keys must be Strings or Symbols"
-      end
       "#{dump(key)}#{dump(value)}"
     end.join
     "#{contents.bytesize}:#{contents}}"

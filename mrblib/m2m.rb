@@ -21,8 +21,10 @@ class M2M
     CZMQ::Zframe.new("#{sender} #{TNetStrings.dump(conn_id)} #{body}").send(@pub)
   end
 
+  CLOSE = ''
+
   def close(sender, conn_id)
-    send(sender, conn_id, nil)
+    send(sender, conn_id, CLOSE)
   end
 
   METHOD = 'METHOD'
@@ -62,30 +64,21 @@ class M2M
     raise e
   end
 
-  CSTAR = 'C*'
+  CC = 'CC'
+  CCN = 'CCn'
+  CCQGT = 'CCQ>'
 
   def send_websocket(sender, conn_id, data, opcode = 1, rsvd = 0)
     data = String(data)
     len = data.bytesize
     raise ArgumentError, "len musn't be negative" if len < 0
     header =  if len <= 125
-                [0x80|rsvd<<4|opcode, len]
+                [0x80|rsvd<<4|opcode, len].pack(CC)
               elsif len >= 126 && len <= 65535
-                [0x80|rsvd<<4|opcode, 126, (len >> 8) & 255, (len) & 255]
+                [0x80|rsvd<<4|opcode, 126, len].pack(CCN)
               else
-                [
-                  0x80|rsvd<<4|opcode,
-                  127,
-                  (len >> 56) & 255,
-                  (len >> 48) & 255,
-                  (len >> 40) & 255,
-                  (len >> 32) & 255,
-                  (len >> 24) & 255,
-                  (len >> 16) & 255.
-                  (len >> 8) & 255,
-                  (len) & 255
-                ]
-              end.pack(CSTAR)
+                [0x80|rsvd<<4|opcode, 127, len].pack(CCQGT)
+              end
     send(sender, conn_id, "#{header}#{data}")
   end
 end
