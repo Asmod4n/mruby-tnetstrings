@@ -59,6 +59,7 @@ module TNetStrings
   HASH = '}'
   NIL = '~'
   BOOL = '!'
+  TRUE = 'true'
 
   def self.parse(tnetstring)
     payload, payload_type, remain = parse_payload(tnetstring)
@@ -74,12 +75,9 @@ module TNetStrings
     when HASH
       parse_dictionary(payload)
     when NIL
-      unless payload.bytesize == 0
-        raise ProcessError, "Payload must be 0 length for null"
-      end
       nil
     when BOOL
-      parse_boolean(payload)
+      payload == TRUE
     else
       raise ProcessError, "Invalid payload type: #{payload_type}"
     end
@@ -144,24 +142,9 @@ module TNetStrings
     [key, value, extra]
   end
 
-  FALSE = 'false'
-  TRUE = 'true'
-
-  def self.parse_boolean(data) # :nodoc:
-    case data
-    when FALSE
-      false
-    when TRUE
-      true
-    else
-      raise ProcessError, "Boolean wasn't 'true' or 'false'"
-    end
-  end
-
   # Constructs a tnetstring out of the given object. Valid Ruby object types
   # include strings, integers, boolean values, nil, arrays, and hashes. Arrays
-  # and hashes may contain any of the previous valid Ruby object types, but
-  # hash keys must be strings.
+  # and hashes may contain any of the previous valid Ruby object types.
   #
   # === Example
   #
