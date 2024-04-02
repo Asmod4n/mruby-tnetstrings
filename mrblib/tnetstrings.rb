@@ -73,7 +73,7 @@ module TNetStrings
     [value, remain]
   end
 
-    # Constructs a tnetstring out of the given object. Valid Ruby object types
+  # Constructs a tnetstring out of the given object. Valid Ruby object types
   # include strings, integers, boolean values, nil, arrays, and hashes. Arrays
   # and hashes may contain any of the previous valid Ruby object types.
   #
@@ -121,6 +121,19 @@ module TNetStrings
     end
   end
 
+  def self.dump_dictionary(dict) # :nodoc:
+    contents = dict.map do |key, value|
+      "%s%s" % [dump(key), dump(value)]
+    end.join
+    "%d:%s}" % [contents.bytesize, contents]
+  end
+
+  def self.dump_list(list) # :nodoc:
+    contents = list.map {|item| dump(item)}.join
+    "%d:%s]" % [contents.bytesize, contents]
+  end
+
+  private
   # internal functions
 
   COLON = ':'.freeze
@@ -183,18 +196,6 @@ module TNetStrings
       list << value
     end
     list
-  end
-
-  def self.dump_dictionary(dict) # :nodoc:
-    contents = dict.map do |key, value|
-      "%s%s" % [dump(key), dump(value)]
-    end.join
-    "%d:%s}" % [contents.bytesize, contents]
-  end
-
-  def self.dump_list(list) # :nodoc:
-    contents = list.map {|item| dump(item)}.join
-    "%d:%s]" % [contents.bytesize, contents]
   end
 end
 
